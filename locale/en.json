@@ -1,0 +1,7 @@
+{
+  "meta": {
+    "title": "Chaoxing Assistant",
+    "description": "Opens the Chaoxing (学习通) login page as soon as the plugin is enabled, then auto-discovers unfinished courses, scans chapters and homework, completes videos and documents in a real browser, and uses the host model to answer and submit quizzes and homework (confidence gate and dry-run supported).",
+    "detail": "docs/DETAIL.md"
+  }
+}

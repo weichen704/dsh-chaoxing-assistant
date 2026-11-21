@@ -1,0 +1,69 @@
+{
+  "name": "dsh-chaoxing-assistant",
+  "version": "1.9.5",
+  "description": "DeepSeek Harness 的学习通（超星）任务助手：用真实 Edge + CDP 刷课、自动作答章节测验与作业，附带右侧栏面板与 5 个工具。",
+  "type": "module",
+  "main": "./index.js",
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js",
+    "./icon": "./icon.svg",
+    "./locale/en.json": "./locale/en.json",
+    "./locale/zh.json": "./locale/zh.json",
+    "./docs/DETAIL.md": "./docs/DETAIL.md",
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./package.json": "./package.json"
+  },
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "deepseek-harness",
+    "chaoxing",
+    "xuexitong",
+    "学习通",
+    "cdp",
+    "automation"
+  ],
+  "license": "MIT",
+  "author": "chaoxing-assistant contributors",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/weichen704/dsh-chaoxing-assistant.git"
+  },
+  "homepage": "https://github.com/weichen704/dsh-chaoxing-assistant#readme",
+  "bugs": {
+    "url": "https://github.com/weichen704/dsh-chaoxing-assistant/issues"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "files": [
+    "index.js",
+    "client.js",
+    "lib",
+    "python",
+    "desktop",
+    "locale",
+    "docs",
+    "icon.svg",
+    "cordis.patch.yml",
+    "README.md",
+    "LICENSE"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "immediately": true,
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-conversation",
+        "@deepseek-ai/dsh-client-ui-sidebar-right"
+      ]
+    }
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

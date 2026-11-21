@@ -1,0 +1,25 @@
+- insert:
+    - id: chaoxing-assistant
+      name: "dsh-chaoxing-assistant"
+      config:
+        # 面板与宿主的本地 HTTP 桥端口（只监听 127.0.0.1）
+        uiPort: 9483
+        # 插件启用时（DSH 启动）不自动运行，必须点面板「开始」或调用 chaoxing_auto start
+        autoStart: false
+        # 默认账号别名，可留空；首次使用在面板里点「登录」会按这个别名建账号
+        autoAccount: default
+        # 0 = 停止后永不自动恢复 / 永不自动重扫
+        autoResumeMinutes: 0
+        autoRepeatMinutes: 0
+        auto:
+          account: default
+          concurrency: 2
+          maxMinutes: 180
+          solveQuizzes: true
+          solveWorks: true
+          minConfidence: 0.6
+          autoSubmit: true
+          dryRun: false
+          # 任务页默认在当前窗口开标签（不会每开一个节点就弹新窗口）；
+          # 如果某门课的视频一直不推进，可以改成 true 让每个任务页独立开窗口
+          taskWindow: false
