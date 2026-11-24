@@ -10,6 +10,7 @@ import { registerChaoxingCommands } from './lib/commands.mjs';
 import { DeskEngine } from './lib/deskengine.mjs';
 import { ComputerUse } from './lib/cu.mjs';
 import { startUiBridge } from './lib/uibridge.mjs';
+import { TempCleaner } from './lib/cleanup.mjs';
 
 export const name = 'chaoxing-assistant';
 export const inject = ['tools'];
@@ -62,6 +63,11 @@ export function apply(ctx, config = {}) {
   });
 
   const deps = { store, hub, engine, llm, autopilot, deskEngine, cu, paths, config };
+  // 临时数据清理：用户点「停止」立即清；没点停止则超过 24 小时由后台扫描自动清。
+  // 只清任务日志/验证码/截图/桌面临时文件，不碰登录态、字体和 state.json 里的账号/课程/答案。
+  const tempCleaner = new TempCleaner({ deps, config, log: logs('cleanup') });
+  deps.cleanup = tempCleaner;
+  tempCleaner.start();
   const disposers = [];
 
   // 右侧栏面板与工具共用同一套操作：注册 /chaoxing 命令
@@ -90,7 +96,25 @@ export function apply(ctx, config = {}) {
   // 不再用 ctx.remote.commands.execute（那条通道每调一次都会在会话里留一条记录 → 刷屏）。
   let uiBridge = null;
   try {
+    // v2.2.2：面板优先走 DSH 自己的同源路由（dsh-app://app/chaoxing/*）。
+    // 旧版只有 127.0.0.1:9483 一条路，而桌面端渲染进程的 Origin 是 dsh-app://app，
+    // 被桥的 CORS 白名单 403 掉 → 面板永远「未连接」、按钮点了没反应。
     uiBridge = startUiBridge({ deps, config, log: logs('ui') });
+    // webServer 是宿主里后注册的兄弟插件，启动这一刻通常拿不到；
+    // ctx.inject 会在服务就绪（以及被替换）时回调，把同源路由接上去。
+    try {
+      if (ctx && typeof ctx.inject === 'function') {
+        ctx.inject(['webServer'], (webCtx) => {
+          try {
+            uiBridge?.attachWebServer(webCtx?.webServer);
+          } catch (e) {
+            store.pushLog('ui', { ev: 'ui-route-fail', err: String((e && e.message) || e).slice(0, 200) });
+          }
+        });
+      }
+    } catch (e) {
+      store.pushLog('ui', { ev: 'ui-inject-fail', err: String((e && e.message) || e).slice(0, 200) });
+    }
     disposers.push(() => {
       try {
         uiBridge.close();
@@ -233,7 +257,12 @@ export function apply(ctx, config = {}) {
       autoKeepAliveTimer = null;
     }
     try {
-      autopilot.stop('plugin-dispose');
+      tempCleaner.dispose();
+    } catch {
+      /* ignore */
+    }
+    try {
+      Promise.resolve(autopilot.stop('plugin-dispose')).catch(() => {});
     } catch {
       /* ignore */
     }
@@ -255,6 +284,7 @@ export function apply(ctx, config = {}) {
     }
     try {
       store.flush();
+      store.dispose?.();
     } catch {
       /* ignore */
     }

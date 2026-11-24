@@ -29,8 +29,9 @@
 默认 `%USERPROFILE%\.dsh-chaoxing`（可用环境变量 `CHAOXING_DATA_DIR` 或插件配置 `dataDir` 覆盖）：
 
 ```
-state.json          账号、课程、扫描结果、缓存答案、作业记录
-logs/job_<id>.jsonl 每次运行任务的 JSONL 日志
+state.json          账号、课程、扫描结果、缓存答案、作业记录（v2.1.0 起单行紧凑存储，无改动不重写）
+logs/job_<id>.jsonl 每次运行任务的 JSONL 日志（只保留最近 20 个终态任务）
+logs/plugin.jsonl   插件日志（250ms 批量落盘，8MB 滚动）
 profiles/<账号>/    该账号独立 Edge profile（登录态在这里）
 fonts/<md5>.ttf     反爬字体样本
 fonts/<md5>.json    字体码点 → 真实汉字 的映射缓存
@@ -42,9 +43,19 @@ captchas/*.png      每次尝试的验证码截图（人工兜底用）
 目标课程输入框支持：课程名（如「电工电子技术」）、courseid、`courseid:clazzid:cpi`、课程 URL；留空时自动挑扫描记录里第一门还有待完成的课。课程名有歧义时会列出候选让你补 courseid。
 
 
-插件同时带一个 **Client 半**（`client.js`），在会话右上角的 utilities 区注册「📚 学习通」按钮：点开后右侧栏出现「学习通助手」面板，8 个按钮（刷新状态 / 打开登录页 / 检测登录 / 扫描课程 / 刷课+做题 / 做作业 / 开始 / 停止）。
+插件同时带一个 **Client 半**（`client.js`），在会话右上角的 utilities 区注册「📚 学习通」按钮：点开后右侧栏出现「学习通助手」面板。顶部先选运行环境（网页版 / 桌面版），下面是课程输入框 + 三组动作：开始/停止（主操作）、扫描/刷课/作业、登录/检查/刷新，共 8 个按钮。
 
-面板按钮并不直接操作浏览器，而是通过 Client 的 **Remote 命令通道**执行 `/chaoxing <verb>`（`ctx.remote.commands.execute(sessionId, '/chaoxing status', [])`），宿主侧由 `lib/commands.mjs` 用 `ctx.commands.register()` 注册的同名命令处理——所以**面板、斜杠命令、工具三者的行为完全一致**，都落在同一个 `Engine` / `Autopilot` 上。
+面板按钮并不直接操作浏览器，而是调用同一个请求处理器（`lib/uibridge.mjs`）：`GET /snapshot?mode=` 一次取回进度文本 + 结构化状态，`POST /action` 执行动作。所以**面板、斜杠命令、工具三者的行为完全一致**，都落在同一个 `Engine` / `Autopilot` 上；桥的请求不进会话记录，避免刷屏。
+
+这个处理器有两个入口（v2.2.2）：
+
+1. **DSH 同源前缀路由 `/chaoxing/*`**（面板首选）：宿主侧用 `ctx.inject(['webServer'], …)` 在 DSH 自己的 `webServer` 上 `register({ kind: 'prefix', path: '/chaoxing' })`。桌面端渲染进程的 Origin 是自定义协议 `dsh-app://app`，Electron 的 `protocol.handle` 会把非静态路径转发给宿主 HTTP 服务，所以面板 `fetch('/chaoxing/snapshot')` 与页面**同源**，不触发 CORS、不需要额外端口。
+2. **独立回环端口 `127.0.0.1:9483`**（兼容保留，可用 `config.uiPort` 改）：给旧面板、外部脚本和自测用；面板只在同源路由不可达时才退到这条。
+
+面板按「同源 → 9483」顺序自适应，记住可用的那条，失败就换下一条并在状态里显示原因；`GET /health` 会带上 `hits:{server,route}` 与 `route:true/false`，用来确认面板究竟有没有在轮询。
+
+桥的安全与并发约束（v2.2.2）：独立端口只监听回环地址，同源路由挂在 DSH 自己的回环服务上；两条通道都只放行空 Origin、`null`、`http(s)` 回环/私网与 `dsh-app://`；`POST /action` 要求 `Content-Type: application/json`，同名动作在飞时返回 `busy:true`，不同动作串行执行；`/progress`、`/state`、`/snapshot` 共享 400ms 记忆层，面板即使多开也不会重复计算快照。
+
 
 命令也可以直接在输入框里敲，输出会作为命令结果出现在会话里：
 
@@ -90,7 +101,7 @@ captchas/*.png      每次尝试的验证码截图（人工兜底用）
 
 - 默认 `autoStart: false` → 启用插件不跑任何任务；`start` 只能由面板「开始」/`/chaoxing auto`/工具调用来触发。
 - 「停止」（面板按钮 ■ / `/chaoxing stop` / `chaoxing_auto stop`）= 硬停止：终止当前 job + 清空 autopilot 队列与结果（`autopilot.abort()`），`autoResumeMinutes`/`autoRepeatMinutes` 默认 0，所以**不会自动恢复、也不会自动重扫**。
-- 面板**不自动轮询**：只在点击按钮时执行一条命令并显示结果（远程命令会在会话里留记录，轮询会刷屏）。
+- 面板**自动轮询**：每 2.5 秒一次 `GET /snapshot`（失败按 2.5s → 5s → 10s → 20s 退避，恢复后自动回到 2.5s）；轮询走本机 HTTP 桥，不写会话记录。内容没变时不重渲染，`role="log"` 关闭读屏自动播报。
 - **只开一个登录窗口**：刚启动的 Edge 复用自带标签页；已在运行则在当前窗口开标签页（`newWindow:false`）；当前页已是登录页时跳过重复导航。
 - 若把 `autoStart` 改成 `true`，才会启用 keep-alive 看门狗（45s 检查、失败退避重试）与可选的自动续跑/重扫。
 - 默认账号取配置 `autoAccount`，不再误用 `default` 另开浏览器。
@@ -201,6 +212,10 @@ chaoxing_tasks    {"action":"status","jobId":"..."}        # 反复看进度
 | 文档"假到底" | 没有滚到正确内层容器：v1.3.2 起会自动逐层下钻（`cards → ananas/modules/pdf → pan-yz screen/file`），日志里 `doc-end k=rolled` 且有 `metric:true` 才算成功 |
 | 文档滚到底了但任务点没涨 | 2026-09 起学习通换成 pan-yz 阅读器，服务端是否计点不稳定：插件会真实滚轮翻到底（最多 30 轮 + 到底后停留），但不保证每个课程都记分；视频、章节测验、作业不受影响。这类节点会在两轮目录复核后自动止损（`stale-stop`），不会无限重试 |
 | 某门课作业列表一直转（`work-list-retry`） | 该课程没有作业或作业列表页结构异常：v1.3.3 起只重试 2 轮快轮询就放弃，继续下一门课 |
+| 点「作业」后面板报「没能打开《X》的『作业』列表：客户端还停在课程章节页」 | 桌面客户端点了左侧「作业」却没切页（加载慢/导航认错/页面停在章节）：v2.2.11 起会自己重试 UIA 直点、激活已开的「作业」标签，仍失败就以 `error` 结束并给出原因，不再静默报「0 份未交」；照提示在客户端手动点一次「作业」，看到作业清单后再跑 |
+| 点了导航/课程卡片没反应，报 `not-on-list` / `not-course-page` / `course-not-found`，或打开了错的课 | 桌面驱动的点击坐标靠 `cu-calibrate` 标定（`scale = 客户端窗口宽 / 2582`）。v2.2.12 起按进程名 `cxstudy.exe` 认窗口，不再被「标题里带学习通」的 DeepSeek Harness 窗口带偏；若仍异常，先看 `logs/plugin.jsonl` 的 `cu-calibrate` 行确认 `cuWin` 是 `cxstudy.exe`、`scale ≈ 0.5256`（2582 宽窗口） |
+| 作业列表读成 0 行（`works-list all:0 rows:[]`） | 标题行的横向窗口与客户端布局不符。v2.2.12 起下限放宽到 `box.x-140`，并在读空时落 `works-ocr`（前 14 行带坐标）便于调阈值；也可直接把判据贴进 issue |
+| 面板课程名填成「python程序设计作业」也对 | v2.2.11 起 `courseSpec` 会剥掉尾部的「作业/习题」等动作后缀（`的作业`、`作业点`、`作业列表`、`（作业）` 都认），再拿去匹配课程卡片 |
 | `chaoxing_auto` 卡在 `waiting-login` | 在已经打开的 Edge 窗口里完成扫码/登录；插件每 4 秒轮询一次，登录后自动进入下一阶段 |
 | `chaoxing_auto` 报"未检测到可用的模型服务" | 宿主没有给插件 `llm` 服务或没选默认模型：先在 DSH 里选好默认模型，再 `chaoxing_auto {"action":"llm"}` 自检 |
 | 模型作答被跳过（`quiz-low-confidence` / `work-low-confidence`） | 置信度低于 `minConfidence`：调低门限（如 0.5）重跑，或先用 `dryRun` 看答案再人工决定 |

@@ -23,6 +23,7 @@ public class W2 {
   [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr h, int n);
   [DllImport("user32.dll")] public static extern bool SetCursorPos(int x, int y);
   [DllImport("user32.dll")] public static extern void mouse_event(uint f, uint dx, uint dy, uint d, UIntPtr e);
+  [DllImport("user32.dll")] public static extern bool IsIconic(IntPtr h);
 }
 "@
 Add-Type -TypeDefinition $sig | Out-Null
@@ -62,9 +63,16 @@ function ClickAt([int]$cx, [int]$cy) {
 }
 
 function Focus($w) {
-  try { [W2]::ShowWindow([IntPtr]$w.Current.NativeWindowHandle, 9) | Out-Null } catch {}
-  try { [W2]::SetForegroundWindow([IntPtr]$w.Current.NativeWindowHandle) | Out-Null } catch {}
-  Start-Sleep -Milliseconds 100
+  $h = [IntPtr]$w.Current.NativeWindowHandle
+  # 不能用 SW_RESTORE(9) 无条件还原：会把已最大化的窗口缩回普通尺寸
+  try {
+    if ([W2]::IsIconic($h)) {
+      [W2]::ShowWindow($h, 9) | Out-Null
+      Start-Sleep -Milliseconds 100
+    }
+  } catch {}
+  try { [W2]::SetForegroundWindow($h) | Out-Null } catch {}
+  Start-Sleep -Milliseconds 80
 }
 
 switch ($Cmd) {
