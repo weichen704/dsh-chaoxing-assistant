@@ -1,8 +1,8 @@
 # 对学习通桌面客户端截图做 OCR，输出文字与窗口内坐标（供点击用）
-import sys, json
+import sys, json, os, tempfile
 from rapidocr_onnxruntime import RapidOCR
 
-path = sys.argv[1] if len(sys.argv) > 1 else ""
+path = sys.argv[1] if len(sys.argv) > 1 else os.path.join(tempfile.gettempdir(), "desk-chapters.png")
 ocr = RapidOCR()
 res, _ = ocr(path)
 items = []

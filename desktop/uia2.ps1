@@ -10,6 +10,9 @@ $ErrorActionPreference = 'Stop'
 $core = if ($CorePs1) { $CorePs1 } else { Join-Path $PSScriptRoot 'uia2core.ps1' }
 . $core
 
+# 截图只允许落在 Out 文件所在目录（纯文件名由 core 的 ResolveShotPath 强制）
+$script:OutDir = if ($Out) { [IO.Path]::GetDirectoryName([IO.Path]::GetFullPath($Out)) } else { '' }
+
 $st = ResolveWin $AppPid
 if ($st -ne 'ok') {
   Write-Payload (Build-ErrPayload $st) $Out

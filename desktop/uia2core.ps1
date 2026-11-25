@@ -104,6 +104,9 @@ $script:WX = 0; $script:WY = 0; $script:WW = 0; $script:WH = 0
 $script:hWnd = [IntPtr]::Zero
 $script:tops = @()
 $script:appPids = @()
+# 截图输出目录：由入口脚本设置（常驻入口=workDir，一次性入口=Out 文件所在目录）。
+# 为空时退回临时目录。截图文件名永远被压成纯文件名，不接受调用方给的路径。
+$script:OutDir = ''
 
 # 解析目标窗口。返回 'ok' / 'window-not-found' / 'window-rect-invalid'。
 # -Reuse：常驻模式下窗口没变就直接复用缓存（不重启进程、不 sleep 350ms）；
@@ -207,7 +210,12 @@ function Build-ErrPayload([string]$kind) {
     return @{ pid = $script:win.Current.ProcessId; name = $script:win.Current.Name; err = 'window-rect-invalid'; x = $script:WX; y = $script:WY; w = $script:WW; h = $script:WH }
   }
   $tops = @()
-  try { $tops = @($script:tops | ForEach-Object { @{ pid = $_.Current.ProcessId; name = $_.Current.Name; class = $_.Current.ClassName } }) } catch {}
+  try {
+    # 只回学习通相关窗口名，避免把用户其它程序（浏览器标签、聊天窗口）的标题写进插件日志/面板
+    $tops = @($script:tops | Where-Object {
+      try { ([string]$_.Current.Name) -match '(?i)cxstudy|学习通|chaoxing' } catch { $false }
+    } | Select-Object -First 8 | ForEach-Object { @{ pid = $_.Current.ProcessId; name = $_.Current.Name; class = $_.Current.ClassName } })
+  } catch {}
   return @{ pid = 0; name = ''; class = ''; x = 0; y = 0; w = 0; h = 0; err = 'window-not-found'; tops = $tops }
 }
 
@@ -267,11 +275,27 @@ function PostWheelAt([int]$cx, [int]$cy, [int]$delta) {
 function CaptureRegion([int]$x, [int]$y, [int]$w, [int]$h) {
   if ($w -le 0) { $w = $script:WW }
   if ($h -le 0) { $h = $script:WH }
+  # 打印尺寸钳死在 1..4096：否则一个异常/注入的 w/h 就能申请 100000×100000 位图把进程打爆
+  $w = [Math]::Min(4096, [Math]::Max(1, $w))
+  $h = [Math]::Min(4096, [Math]::Max(1, $h))
   $bmp = New-Object System.Drawing.Bitmap($w, $h)
   $g = [System.Drawing.Graphics]::FromImage($bmp)
   $g.CopyFromScreen(($script:WX + $x), ($script:WY + $y), 0, 0, $bmp.Size)
   $g.Dispose()
   return $bmp
+}
+# 截图落盘路径只允许「纯文件名 + .png」并固定放在 OutDir 下：
+# 拒绝绝对路径、盘符与 ..，避免页面/调用方控制任意文件写入（内容恒为 PNG）。
+function ResolveShotPath([string]$name) {
+  $base = ''
+  try { $base = [IO.Path]::GetFileName([string]$name) } catch {}
+  if (-not $base) { $base = 'shot-' + (Get-Date).ToString('yyyyMMddHHmmssfff') + '.png' }
+  $base = ($base -replace '[\\/:*?"<>|\x00-\x1f]', '_')
+  if ($base -notmatch '(?i)\.png$') { $base = $base + '.png' }
+  $root = $script:OutDir
+  if (-not $root) { $root = [IO.Path]::GetTempPath() }
+  try { if (-not [IO.Directory]::Exists($root)) { [void][IO.Directory]::CreateDirectory($root) } } catch {}
+  return [IO.Path]::Combine($root, $base)
 }
 function ShotRegion([string]$file, [int]$x, [int]$y, [int]$w, [int]$h) {
   $bmp = CaptureRegion $x $y $w $h
@@ -289,6 +313,8 @@ function RegionHash([int]$x, [int]$y, [int]$w, [int]$h) {
   return $hash.Substring(0, 16)
 }
 function OcrRegion([int]$x, [int]$y, [int]$w, [int]$h, [double]$scale = 1.0) {
+  if ($scale -lt 1) { $scale = 1 }
+  if ($scale -gt 4) { $scale = 4 }
   $bmp = CaptureRegion $x $y $w $h
   $tmp = Join-Path $env:TEMP ('cx-ocr-' + [Guid]::NewGuid().ToString('N') + '.png')
   try {
@@ -345,10 +371,21 @@ function Invoke-Actions($acts) {
         'wheel' { WheelAt ((SafeInt ($script:WX + (SafeInt $a.x)))) ((SafeInt ($script:WY + (SafeInt $a.y)))) (SafeInt $a.dy); $r.ok = $true }
         'postwheel' { FocusWin; $r.ok = PostWheelAt ((SafeInt ($script:WX + (SafeInt $a.x)))) ((SafeInt ($script:WY + (SafeInt $a.y)))) (SafeInt $a.dy) }
         'key' { FocusWin; [System.Windows.Forms.SendKeys]::SendWait([string]$a.seq); $r.ok = $true }
-        'paste' { FocusWin; Set-Clipboard -Value ([string]$a.text); Start-Sleep -Milliseconds 120; [System.Windows.Forms.SendKeys]::SendWait('^v'); $r.ok = $true }
-        'sleep' { Start-Sleep -Milliseconds (SafeInt $a.ms); $r.ok = $true }
-        'shot' { FocusWin; Start-Sleep -Milliseconds 120; ShotRegion ([string]$a.out) 0 0 0 0; $r.ok = $true; $r.out = $a.out }
-        'cropshot' { FocusWin; Start-Sleep -Milliseconds 120; ShotRegion ([string]$a.out) (SafeInt $a.x) (SafeInt $a.y) (SafeInt $a.w) (SafeInt $a.h); $r.ok = $true; $r.out = $a.out }
+        'paste' {
+          FocusWin
+          # 先备份原剪贴板并在粘贴后恢复：答案/题目文本不要长期留在用户的剪贴板里
+          $prev = $null
+          try { $prev = Get-Clipboard -Raw -ErrorAction Stop } catch {}
+          Set-Clipboard -Value ([string]$a.text)
+          Start-Sleep -Milliseconds 120
+          [System.Windows.Forms.SendKeys]::SendWait('^v')
+          Start-Sleep -Milliseconds 300
+          if ($null -ne $prev) { try { Set-Clipboard -Value ([string]$prev) } catch {} }
+          $r.ok = $true
+        }
+        'sleep' { Start-Sleep -Milliseconds ([Math]::Min(10000, [Math]::Max(0, (SafeInt $a.ms)))); $r.ok = $true }
+        'shot' { FocusWin; Start-Sleep -Milliseconds 120; $p = ResolveShotPath ([string]$a.out); ShotRegion $p 0 0 0 0; $r.ok = $true; $r.out = $p }
+        'cropshot' { FocusWin; Start-Sleep -Milliseconds 120; $p = ResolveShotPath ([string]$a.out); ShotRegion $p (SafeInt $a.x) (SafeInt $a.y) (SafeInt $a.w) (SafeInt $a.h); $r.ok = $true; $r.out = $p }
         'hash' { FocusWin; Start-Sleep -Milliseconds 80; $r.hash = RegionHash (SafeInt $a.x) (SafeInt $a.y) (SafeInt $a.w) (SafeInt $a.h); $r.ok = $true }
         'ocr' { FocusWin; Start-Sleep -Milliseconds 100; $r.items = OcrRegion (SafeInt $a.x) (SafeInt $a.y) (SafeInt $a.w) (SafeInt $a.h) ([double]($(if ($a.scale) { $a.scale } else { 1.0 }))); $r.ok = $true }
         'rect' {
@@ -396,6 +433,8 @@ function Invoke-Actions($acts) {
         }
         'scrolluia' {
           $found = $false
+          # 次数钳在 1..50：每次滚动 100ms，无上限时一个请求就能把常驻进程占住几分钟
+          $times = [Math]::Min(50, [Math]::Max(1, [int](SafeInt $a.count)))
           $all = UiAll $script:win
           foreach ($e in $all) {
             if ($found) { break }
@@ -405,7 +444,7 @@ function Invoke-Actions($acts) {
               try {
                 $sp = $e.GetCurrentPattern([System.Windows.Automation.ScrollPattern]::Pattern)
                 if ($sp.Current.VerticallyScrollable) {
-                  for ($i = 0; $i -lt [int]$a.count; $i++) {
+                  for ($i = 0; $i -lt $times; $i++) {
                     if ($a.direction -eq 'up') { $sp.Scroll([System.Windows.Automation.ScrollAmount]::LargeDecrement) } else { $sp.Scroll([System.Windows.Automation.ScrollAmount]::LargeIncrement) }
                     Start-Sleep -Milliseconds 100
                   }
