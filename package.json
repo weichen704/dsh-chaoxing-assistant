@@ -1,7 +1,7 @@
 {
   "name": "dsh-chaoxing-assistant",
-  "version": "2.2.13",
-  "description": "DeepSeek Harness 的学习通（超星）任务助手：用真实 Edge + CDP 刷课、自动作答章节测验与作业，附带右侧栏面板与 5 个工具。",
+  "version": "2.3.0",
+  "description": "学习通（超星）任务助手：真实 Edge 或 Windows 客户端完成视频/文档、章节测验与作业，右侧栏面板 + 5 个工具。人工验证自动停机、空题不交卷、播完先等平台确认。",
   "type": "module",
   "main": "./index.js",
   "exports": {

@@ -16,9 +16,17 @@
           maxMinutes: 180
           solveQuizzes: true
           solveWorks: true
-          minConfidence: 0.6
+          minConfidence: 0.75
           autoSubmit: true
           dryRun: false
+          # 允许提交的空白题数上限：0=只要还有空题就存草稿不交卷（防止低分卷）
+          maxBlanks: 0
+          # 连续多少个视频「播放器放完但平台未确认完成」就停机（0=不检查）
+          videoNotConfirmedMax: 3
+          # 交卷前回读页面空题数：题数与抓到的题一致时以页面为准，否则退回答案计划
+          blankGuard: true
+          # 出现人脸/活体/实人认证提示就停机，零点击、不尝试绕过
+          humanGuard: true
           # 任务页默认在当前窗口开标签（不会每开一个节点就弹新窗口）；
           # 如果某门课的视频一直不推进，可以改成 true 让每个任务页独立开窗口
           taskWindow: false
