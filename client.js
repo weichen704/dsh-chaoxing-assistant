@@ -1,5 +1,5 @@
 window.__ModuleLoader__.load({
-  id: '@local/chaoxing-assistant',
+  id: 'dsh-chaoxing-assistant',
   factory(require) {
     const React = require('react');
     if (!React || typeof React.createElement !== 'function') return {};
@@ -9,8 +9,8 @@ window.__ModuleLoader__.load({
     const useEffect = React.useEffect;
     const useRef = React.useRef;
     const useMemo = React.useMemo;
-    const DEF_ID = '@local/chaoxing-assistant';
-    const VERSION = '2.3.0';
+    const DEF_ID = 'dsh-chaoxing-assistant';
+    const VERSION = '2.3.1';
     const UI_PORT = 9483;
     // 两条传输：优先 DSH 同源路由（dsh-app://app 下无 CORS/无额外端口），失败再退到本机独立端口。
     // v2.2.1 只写死了 http://127.0.0.1:9483，桌面端 Origin 是 dsh-app://app，被桥 403 掉 → 永远「未连接」。

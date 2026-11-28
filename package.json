@@ -1,6 +1,6 @@
 {
   "name": "dsh-chaoxing-assistant",
-  "version": "2.3.0",
+  "version": "2.3.1",
   "description": "学习通（超星）任务助手：真实 Edge 或 Windows 客户端完成视频/文档、章节测验与作业，右侧栏面板 + 5 个工具。人工验证自动停机、空题不交卷、播完先等平台确认。",
   "type": "module",
   "main": "./index.js",
